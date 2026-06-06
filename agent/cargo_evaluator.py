@@ -84,6 +84,25 @@ class CargoEvaluationResult:
     area_cargo_density: float = 0.0     # 当前区域货源密度估计
     avg_profit_per_minute: float = 0.0  # 当前区域平均 PPM
     top5_profit_per_minute: float = 0.0 # Top5 平均 PPM
+    # 状态转移分析（接单后的状态）
+    post_delivery_analysis: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class PostDeliveryState:
+    """接单完成后的状态预估——帮助 LLM 做 MDP 式的前瞻决策。"""
+    cargo_id: str
+    end_lat: float                # 卸货地纬度
+    end_lng: float                # 卸货地经度
+    end_city: str                 # 卸货城市
+    finish_minute: int            # 预计完成时刻（仿真分钟）
+    finish_day: int               # 预计完成日期（1-31）
+    finish_hour: int              # 预计完成小时（0-23）
+    is_night_arrival: bool        # 是否夜间到达（21-6点）
+    is_month_end: bool            # 是否月末到达（>25天）
+    total_time_spent: int         # 从当前到卸货总耗时
+    net_profit: float             # 净收益
+    profit_per_minute: float      # PPM
 
 
 # ---------------------------------------------------------------
@@ -180,6 +199,52 @@ class CargoEvaluator:
             avg_profit_per_minute=avg_ppm,
             top5_profit_per_minute=top5_ppm,
         )
+
+    def analyze_post_delivery(
+        self,
+        evaluated_cargos: list[EvaluatedCargo],
+        simulation_minutes: int,
+        top_n: int = 5,
+    ) -> list[dict[str, Any]]:
+        """对 Top-N 货源做状态转移分析：计算接单后的位置和时间。
+
+        这帮助 LLM 进行 MDP 式的前瞻决策——不仅看当前收益，
+        还看接单后"你会出现在哪里，是什么时间"。
+        """
+        results: list[dict[str, Any]] = []
+        month_end = 31 * 24 * 60  # 44640 min
+
+        for ev in evaluated_cargos[:top_n]:
+            cargo = ev.raw
+            end = cargo.get("end", {})
+            end_lat = float(end.get("lat", 0))
+            end_lng = float(end.get("lng", 0))
+            end_city = str(end.get("city", "未知"))
+
+            finish_min = simulation_minutes + ev.total_time_min
+            finish_day = finish_min // 1440 + 1
+            finish_hour = (finish_min % 1440) // 60
+
+            results.append({
+                "cargo_id": ev.cargo_id,
+                "end_lat": round(end_lat, 4),
+                "end_lng": round(end_lng, 4),
+                "end_city": end_city,
+                "finish_minute": finish_min,
+                "finish_day": finish_day,
+                "finish_hour": finish_hour,
+                "is_night_arrival": finish_hour >= 21 or finish_hour < 6,
+                "is_month_end": finish_day > 25,
+                "exceeds_month": finish_min > month_end,
+                "total_time_spent": ev.total_time_min,
+                "net_profit": ev.net_profit,
+                "profit_per_minute": ev.profit_per_minute,
+                "end_hub_distance_km": round(min(
+                    haversine_km(end_lat, end_lng, hlat, hlng)
+                    for hlat, hlng, _ in _LOGISTICS_HUBS
+                ), 1),
+            })
+        return results
 
     def get_cargo_by_id(self, evaluated: list[EvaluatedCargo], cargo_id: str) -> EvaluatedCargo | None:
         """按 cargo_id 查找已评估的货源。"""

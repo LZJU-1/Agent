@@ -304,6 +304,79 @@ class PreferenceTracker:
             else:
                 ps.status = "ok"
 
+    def generate_proactive_hints(self) -> list[str]:
+        """生成前瞻性建议——告诉 LLM 当前需要做什么来满足偏好。
+
+        这些提示基于对偏好文本的通用分析（不硬编码具体规则），
+        结合追踪到的状态给 LLM 策略性建议。
+        """
+        hints: list[str] = []
+        current_day = self._sim_minutes // 1440
+        hour = (self._sim_minutes % 1440) // 60
+        total_days = current_day + 1
+        remaining_days = 31 - current_day
+
+        for ps in self._pref_statuses:
+            text = ps.content
+
+            # 休息类偏好：检查今天是否已满足
+            if any(kw in text for kw in ["休息", "睡觉", "熄火", "停车"]):
+                # 检查当前时间是否在常见休息窗口
+                if hour >= 22 or hour < 6:
+                    today_rest = self._daily_rest.get(current_day, [])
+                    if not today_rest:
+                        hints.append(f"💤 偏好P{ps.index+1}要求休息，当前为夜间({hour}点)，建议现在 wait。")
+
+            # 天数类偏好：检查完成进度
+            if any(kw in text for kw in ["每月", "整月", "本月", "起码", "至少"]):
+                # 尝试从文本中提取数字
+                import re
+                numbers = re.findall(r'(\d+)\s*(?:天|个|次)', text)
+                if numbers:
+                    target = int(numbers[0])
+                    active_days = sum(1 for v in self._daily_active_min.values() if v > 0)
+                    if "不出车" in text or "歇着" in text or "停驶" in text or "完全" in text:
+                        full_rest_days = sum(
+                            1 for d in range(current_day + 1)
+                            if self._daily_active_min.get(d, 0) == 0
+                        )
+                        if full_rest_days < target and remaining_days <= target - full_rest_days + 2:
+                            hints.append(
+                                f"⚠️ 偏好P{ps.index+1}：需{target}天完全休息，已完成{full_rest_days}天，"
+                                f"仅剩{remaining_days}天！尽快安排全天休息。"
+                            )
+
+            # 日期特定偏好
+            if any(kw in text for kw in ["号", "日"]):
+                import re
+                dates = re.findall(r'(\d+)\s*号', text)
+                for d in dates:
+                    target_day = int(d)
+                    if target_day == current_day + 1:
+                        hints.append(f"📅 偏好P{ps.index+1}：今天是3月{target_day}号，请检查是否有特殊要求！")
+                    elif target_day == current_day + 2:
+                        hints.append(f"📅 偏好P{ps.index+1}：明天是3月{target_day}号，提前规划路线。")
+
+        return hints
+
+    def record_order_details(
+        self,
+        cargo_name: str = "",
+        start_city: str = "",
+        end_city: str = "",
+    ) -> None:
+        """从外部（决策服务）记录接单的品类和城市信息。
+
+        由于 tracker 只能看到 action 记录而看不到 cargo 详情，
+        这个方法是决策服务在接单成功后调用来补充信息的。
+        """
+        if cargo_name:
+            self._accepted_categories.append(cargo_name)
+        if start_city:
+            self._accepted_regions.append(start_city)
+        if end_city:
+            self._accepted_regions.append(end_city)
+
     @staticmethod
     def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
         """合并重叠区间。"""

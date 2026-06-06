@@ -122,8 +122,45 @@ def _status_section(s: DriverStateSnapshot) -> str:
 
 
 def _preference_section(s: DriverStateSnapshot) -> str:
-    """偏好规则与追踪状态。"""
-    lines = ["## 偏好规则"]
+    """偏好规则 + 今日预警。"""
+    lines = ["## 偏好规则与今日预警"]
+
+    today = s.simulation_day - 1  # 0-based day index
+    today_rest_intervals = s.daily_rest_intervals.get(today, [])
+    today_longest_rest = 0
+    if today_rest_intervals:
+        # 合并重叠区间求最长连续休息
+        sorted_int = sorted(today_rest_intervals)
+        merged = [sorted_int[0]]
+        for start, end in sorted_int[1:]:
+            if start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        today_longest_rest = max((e - s) for s, e in merged)
+
+    today_active = s.daily_active_minutes.get(today, 0)
+    hour = s.simulation_hour
+
+    # 今日预警
+    warnings = []
+    if today_longest_rest > 0:
+        warnings.append(f"今日已连续休息 {today_longest_rest//60}h{today_longest_rest%60}m")
+    if today_active > 0:
+        warnings.append(f"今日已活跃 {today_active} 分钟")
+    if hour >= 20 and today_longest_rest < 480:
+        warnings.append(f"⚠️ 已{hour}点，今日连续休息仅{today_longest_rest//60}h{today_longest_rest%60}m，建议尽快安排长时间休息！")
+
+    # 月末紧迫提醒
+    remaining = 31 - s.simulation_day
+    for ps in s.preference_statuses:
+        if "整天" in ps.content or "完全" in ps.content:
+            needed = 3 if "三" in ps.content or "3" in ps.content else (2 if "两" in ps.content or "2" in ps.content else None)
+            if needed and s.total_full_rest_days < needed and remaining < needed - s.total_full_rest_days + 1:
+                warnings.append(f"🔴 仅剩{remaining}天！需{needed}天全休，已完成{s.total_full_rest_days}天，必须立即安排全休！")
+
+    lines.append(f">> 今日状态: {'; '.join(warnings) if warnings else '正常'}")
+
     for ps in s.preference_statuses:
         icon = {"ok": "✅", "violated": "🔴", "needs_attention": "⚠️"}.get(ps.status, "❓")
         lines.append(f"{icon} P{ps.index+1}: {ps.content[:80]}{'...' if len(ps.content)>80 else ''}")

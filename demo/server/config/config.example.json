@@ -5,7 +5,7 @@
   "model_api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
   "model_api_key": "",
   "model_name": "qwen3.5-flash",
-  "model_timeout_seconds": 60,
+  "model_timeout_seconds": 180,
   "results_dir": "results",
   "log_dir": "results/logs",
   "simulation_max_steps": 20000,

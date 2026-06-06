@@ -237,72 +237,140 @@ class PreferenceTracker:
     def _reassess_preferences(self) -> None:
         """重新评估每条偏好的满足状态，生成面向 LLM 的提示。
 
-        重要：这里不做确定性判断（因为偏好是自然语言的），
-        而是计算相关指标，提供信息给 LLM 决策。
+        不做确定性判断（偏好是自然语言），但计算具体指标供 LLM 决策。
         """
         current_day = self._sim_minutes // 1440
         total_days = current_day + 1
+        today_minutes = self._sim_minutes % 1440
+        hour = today_minutes // 60
 
         for ps in self._pref_statuses:
             text = ps.content
             hints: list[str] = []
 
-            # ---- 通用指标计算（不依赖硬编码规则） ----
+            # ---- 每日休息类偏好：精准计算今日状态 ----
+            if any(kw in text for kw in ["每天", "每日"]) and \
+               any(kw in text for kw in ["休息", "睡觉", "熄火", "停车"]):
+                # 今日最长连续休息
+                intervals = self._daily_rest.get(current_day, [])
+                if intervals:
+                    merged = self._merge_intervals(intervals)
+                    today_longest = max((e - s) for s, e in merged)
+                    hints.append(f"今日最长连续休息={today_longest//60}h{today_longest%60}m")
 
-            # 休息相关指标
-            if any(kw in text for kw in ["休息", "睡觉", "熄火", "停车", "停驶", "停着"]):
-                # 统计本月每天最长连续休息
-                for day in range(current_day + 1):
-                    intervals = self._daily_rest.get(day, [])
-                    if intervals:
-                        merged = self._merge_intervals(intervals)
+                    # 尝试提取要求的小时数
+                    import re
+                    nums = re.findall(r'(\d+)\s*小时', text)
+                    if nums:
+                        required = int(nums[0]) * 60
+                        deficit = required - today_longest
+                        if deficit > 0:
+                            hints.append(f"⚠️ 今日还差{deficit//60}h{deficit%60}m才能满足[{text[:30]}...]")
+                            ps.status = "violated"
+                        else:
+                            hints.append(f"✅ 今日休息已达标")
+                            ps.status = "ok"
+                    else:
+                        ps.status = "needs_attention"
+                else:
+                    hints.append("⚠️ 今日尚未休息！")
+                    ps.status = "violated"
+
+                # 月度统计（仅含已过去的整天）
+                past_days_violations = 0
+                for d in range(current_day):
+                    d_intervals = self._daily_rest.get(d, [])
+                    if d_intervals:
+                        merged = self._merge_intervals(d_intervals)
                         longest = max((e - s) for s, e in merged)
-                        longest_h = longest / 60.0
-                        hints.append(f"第{day+1}天最长连续休息={longest_h:.1f}小时")
+                        import re
+                        nums = re.findall(r'(\d+)\s*小时', text)
+                        required = int(nums[0]) * 60 if nums else 480
+                        if longest < required:
+                            past_days_violations += 1
+                if past_days_violations > 0:
+                    hints.append(f"本月过往{past_days_violations}天未达标")
 
-                # 本月完全休息天数
-                full_rest = sum(
-                    1 for d in range(current_day + 1)
-                    if self._daily_active_min.get(d, 0) == 0
-                )
-                hints.append(f"本月完全不出车天数={full_rest}")
+            # ---- 定时休息类偏好（如0-6点休息） ----
+            elif any(kw in text for kw in ["点", "睡觉", "停着", "熄火"]) and \
+                 any(kw in text for kw in ["到", "至", "～"]) and \
+                 not any(kw in text for kw in ["每天", "每日"]):
+                hints.append(f"当前时间={hour:02d}:{self._sim_minutes%1440%60:02d}")
 
-            # 禁接品类相关
-            if any(kw in text for kw in ["不接", "推掉", "一律不", "干不了", "不能接"]):
+                # 检查今日休息窗口内的休息情况
+                import re
+                window_nums = re.findall(r'(\d+)\s*点', text)
+                if len(window_nums) >= 2:
+                    ws, we = int(window_nums[0]), int(window_nums[1])
+                    intervals = self._daily_rest.get(current_day, [])
+                    window_rest = sum(
+                        max(0, min(e, current_day*1440+we*60) - max(s, current_day*1440+ws*60))
+                        for s, e in intervals
+                    ) if intervals else 0
+                    if window_rest > 0:
+                        hints.append(f"今日{ws:02d}-{we:02d}窗口已休息{window_rest}min")
+                        ps.status = "ok"
+                    elif hour >= we:
+                        hints.append(f"⚠️ 今日{ws:02d}-{we:02d}窗口已过，未休息！明天必须遵守")
+                        ps.status = "violated"
+                    elif ws <= hour < we:
+                        hints.append(f"🔴 当前正在休息窗口({ws:02d}-{we:02d})内！必须 wait！")
+                        ps.status = "violated"
+                    else:
+                        hints.append(f"今日休息窗口{ws:02d}-{we:02d}尚未开始")
+                        ps.status = "needs_attention"
+
+            # ---- 禁接品类 ----
+            elif any(kw in text for kw in ["不接", "推掉", "一律不", "干不了", "不能接"]):
                 categories = list(set(self._accepted_categories))
                 if categories:
                     hints.append(f"已接品类: {', '.join(categories[-10:])}")
+                    ps.status = "needs_attention"
+                else:
+                    ps.status = "ok"
 
-            # 区域限制相关
-            if any(kw in text for kw in ["惠州", "深圳", "广州", "东莞", "佛山", "增城", "珠海", "汕头", "不往", "不进"]):
+            # ---- 区域限制 ----
+            elif any(kw in text for kw in ["惠州", "深圳", "广州", "东莞", "佛山", "增城", "珠海", "汕头"]):
                 regions = list(set(self._accepted_regions))
                 if regions:
                     hints.append(f"已涉及区域: {', '.join(regions[-10:])}")
+                    ps.status = "needs_attention"
+                else:
+                    ps.status = "ok"
 
-            # 每月天数要求
-            if any(kw in text for kw in ["每月", "整月", "本月", "这个月", "三月", "起码", "至少", "不少于"]):
-                hints.append(f"本月已过{total_days}天，活跃天数={sum(1 for v in self._daily_active_min.values() if v > 0)}")
+            # ---- 月度天数要求 ----
+            elif any(kw in text for kw in ["每月", "整月", "本月", "起码", "至少"]):
+                active_days = sum(1 for v in self._daily_active_min.values() if v > 0)
+                full_rest_days = sum(1 for d in range(current_day + 1) if self._daily_active_min.get(d, 0) == 0)
+                hints.append(f"本月{total_days}天中，活跃{active_days}天，全休{full_rest_days}天")
 
-            # 特定日期要求
-            if any(kw in text for kw in ["号", "日"]):
+                import re
+                nums = re.findall(r'(\d+)\s*(?:天|个)', text)
+                if nums:
+                    target = int(nums[0])
+                    if "不出车" in text or "歇着" in text or "停驶" in text or "完全" in text:
+                        if full_rest_days >= target:
+                            ps.status = "ok"
+                            hints.append(f"✅ 已满足{target}天全休")
+                        else:
+                            ps.status = "violated"
+                            hints.append(f"⚠️ 需要{target}天全休，已完成{full_rest_days}天")
+
+            # ---- 特定日期 ----
+            elif any(kw in text for kw in ["号", "日"]):
                 hints.append(f"当前日期: 3月{current_day+1}日")
-
-            # 空驶距离限制
-            if any(kw in text for kw in ["空驶", "公里", "km", "KM"]):
-                hints.append(f"累计行驶里程={self._total_distance:.0f}km")
-
-            # 夜间时间限制
-            if any(kw in text for kw in ["零点", "晚上", "夜间", "早上", "凌晨", "点以后", "点到"]):
-                h = self._sim_minutes % 1440 // 60
-                hints.append(f"当前时间={h:02d}:{self._sim_minutes%1440%60:02d}")
-
-            # ---- 状态判断 ----
-            ps.hints = hints
-            # 状态由 LLM 根据提示自行判断，这里只标记"需要关注"
-            if hints:
                 ps.status = "needs_attention"
+
+            # ---- 空驶距离 ----
+            elif any(kw in text for kw in ["空驶", "公里", "km"]):
+                hints.append(f"累计里程={self._total_distance:.0f}km")
+                ps.status = "needs_attention"
+
+            # ---- 默认 ----
             else:
                 ps.status = "ok"
+
+            ps.hints = hints
 
     def generate_proactive_hints(self) -> list[str]:
         """生成前瞻性建议——告诉 LLM 当前需要做什么来满足偏好。

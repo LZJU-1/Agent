@@ -1,0 +1,37 @@
+# Data files (large)
+demo/server/data/
+demo_docs_release_*/demo/server/data/
+
+# Results
+demo/results/
+**/results/
+
+# Config with secrets
+demo/server/config/config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+.DS_Store?
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+demo/server/results/logs/
+
+# History archives
+**/history/
+
+# Credentials
+*.pem
+*.key

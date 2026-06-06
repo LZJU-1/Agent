@@ -1,0 +1,2 @@
+# Agent 算法大赛 - 本地测试依赖
+# 在 demo/server/ 目录下执行: pip install -r requirements.txt

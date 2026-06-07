@@ -171,6 +171,32 @@ def _rest_alert_section(s: DriverStateSnapshot) -> str:
         if h < 6:
             lines.append(f"当前凌晨 {h:02d}:{m:02d}，建议休息至早晨")
 
+    # ---- 日期和地点提醒 ----
+    import re
+    for ps in s.preference_statuses:
+        text = ps.content
+        # 特殊日期提醒
+        dates = re.findall(r'(?:三月|3月)?\s*(\d+)\s*[号日]', text)
+        for d_str in dates:
+            d = int(d_str)
+            if d == s.simulation_day:
+                lines.append(f"🔴 今天3月{d}号！必须执行：{text[:100]}")
+            elif d == s.simulation_day + 1:
+                lines.append(f"⚠️ 明天3月{d}号！提前规划：{text[:100]}")
+
+        # 地点要求 + 完成进度
+        city_matches = re.findall(r'(?:在|去|到)\s*([一-鿿]{2,4})(?:区|市|县|镇)', text)
+        day_matches = re.findall(r'(\d+)\s*(?:个|天)', text)
+        if city_matches and day_matches:
+            target = int(day_matches[0])
+            city = city_matches[0]
+            # 统计已完成天数
+            done = sum(1 for r in s.accepted_cargo_regions if city in r)
+            if done < target:
+                lines.append(f"🔴 需{target}天到{city}，已完成{done}天！请主动找{city}的货源！")
+            else:
+                lines.append(f"✅ {city}已满足：{done}/{target}天")
+
     lines.append("=" * 50)
     return "\n".join(lines)
 

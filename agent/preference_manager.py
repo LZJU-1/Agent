@@ -68,6 +68,8 @@ class PreferenceManager:
         self.monthly_rests: list[MonthlyRest] = []
         self.special_dates: list[SpecialDate] = []
         self._raw_prefs: list[dict] = []  # 保留原始偏好文本用于提取未分类规则
+        self._fulfilled_special_dates: set[int] = set()  # 已满足的特殊日期
+        self._route_progress: dict[int, int] = {}  # route类型: date -> 下一个要去的stop索引
 
         # 追踪
         self._day = 1
@@ -88,6 +90,8 @@ class PreferenceManager:
         self.monthly_rests.clear()
         self.special_dates.clear()
         self._raw_prefs = list(preferences)  # 保存原始偏好
+        # 注意：不在这里 clear _fulfilled_special_dates / _route_progress
+        # 因为 parse() 每步都会调用，清空会导致特殊日期进度丢失
 
         for pref in preferences:
             text = str(pref.get("content", ""))
@@ -252,14 +256,17 @@ class PreferenceManager:
         safe = [c for c in safe
                 if today_minutes + c.get("total_time_min", 0) + 10 <= deadline]
 
-        # 空驶距离限制（软约束：先过滤，若全过滤则保留超限货源）
+        # 空驶距离限制（软约束：过滤超限货源，若全过滤则保留最近的一批）
         deadhead_limit = self._get_deadhead_limit()
         if deadhead_limit > 0:
             within_limit = [c for c in safe
                            if c.get("pickup_distance_km", 0) <= deadhead_limit]
             if within_limit:
                 safe = within_limit
-            # else: 保留原 safe（超限也比没货接好）
+            elif safe:
+                # 没有货源在限制内 → 保留空驶距离最近的 10 条
+                safe.sort(key=lambda c: c.get("pickup_distance_km", 999))
+                safe = safe[:10]
 
         return safe
 
@@ -566,6 +573,100 @@ class PreferenceManager:
                         return True, f"3月{self._day}日禁止进入 {region}: {r.text[:60]}"
 
         return False, ""
+
+    # ================================================================
+    # 铁律 9: 特殊日期 goto_place / route 主动导航
+    # ================================================================
+
+    # 关键位置坐标
+    _LOCATION_COORDS = {
+        "增城": (23.15, 113.67),
+        "四会": (23.32, 112.83),
+        "深圳": (22.54, 114.06),
+        "广州": (23.13, 113.26),
+        "东莞": (23.02, 113.75),
+        "惠州": (23.09, 114.40),
+        "佛山": (22.84, 113.21),
+        "珠海": (22.27, 113.55),
+        "汕头": (23.36, 116.68),
+    }
+
+    def get_special_date_action(
+        self,
+        hour: int,
+        minute: int,
+        current_lat: float,
+        current_lng: float,
+    ) -> dict | None:
+        """特殊日期的主动导航：goto_place → reposition + wait, route → 逐步导航。
+
+        在特殊日期当天，如果尚未到达目标位置，返回强制动作。
+        返回 wait 时标记该日期为已满足。None 表示无特殊要求或已满足。
+        """
+        for r in self.special_dates:
+            for d in r.dates:
+                if self._day != d or d in self._fulfilled_special_dates:
+                    continue
+
+                if r.date_type == "goto_place" and r.regions:
+                    target = r.regions[0]
+                    coords = self._LOCATION_COORDS.get(target)
+                    if not coords:
+                        continue
+                    tlat, tlng = coords
+                    dist = self._haversine_km(current_lat, current_lng, tlat, tlng)
+                    if dist > 3.0:
+                        return {
+                            "action": "reposition",
+                            "params": {"latitude": tlat, "longitude": tlng},
+                        }
+                    else:
+                        # 已到达 → 停留 2 小时，标记完成
+                        self._fulfilled_special_dates.add(d)
+                        return {
+                            "action": "wait",
+                            "params": {"duration_minutes": 120},
+                        }
+
+                elif r.date_type == "route" and len(r.regions) >= 1:
+                    # 路线：按顺序依次到达每个地点（用 _route_progress 记录进度）
+                    progress = self._route_progress.get(d, 0)  # 下一个要去的stop索引
+                    target = r.regions[progress] if progress < len(r.regions) else r.regions[-1]
+                    coords = self._LOCATION_COORDS.get(target)
+                    if coords:
+                        tlat, tlng = coords
+                        dist = self._haversine_km(current_lat, current_lng, tlat, tlng)
+                        if dist > 5.0:
+                            return {
+                                "action": "reposition",
+                                "params": {"latitude": tlat, "longitude": tlng},
+                            }
+                        # 已到达当前目标
+                        if progress == len(r.regions) - 1:
+                            # 最后一个地点
+                            if hour < 14:
+                                self._fulfilled_special_dates.add(d)
+                                return {"action": "wait", "params": {"duration_minutes": 120}}
+                            else:
+                                self._fulfilled_special_dates.add(d)
+                                return None
+                        else:
+                            # 中间地点已到达，前进到下一个
+                            self._route_progress[d] = progress + 1
+                            # 立即继续导航到下一个地点（本次调用递归逻辑由下次调用完成）
+
+        return None
+
+    @staticmethod
+    def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+        """Haversine 距离（km）"""
+        import math
+        r = 6371.0
+        p1, l1 = math.radians(lat1), math.radians(lng1)
+        p2, l2 = math.radians(lat2), math.radians(lng2)
+        dp, dl = p2 - p1, l2 - l1
+        h = math.sin(dp * 0.5) ** 2 + math.cos(p1) * math.cos(p2) * (math.sin(dl * 0.5) ** 2)
+        return 2.0 * r * math.asin(min(1.0, max(0.0, math.sqrt(h))))
 
     # ================================================================
     # 内部

@@ -71,6 +71,14 @@ class ModelDecisionService:
                             driver_id, day, hour, minute, rest["params"]["duration_minutes"])
             return rest
 
+        # 3.5 铁律 9: 特殊日期主动导航 (goto_place / route)
+        special = mgr.get_special_date_action(hour, minute, lat, lng)
+        if special:
+            self._logger.info("SPECIAL: %s d%d %02d:%02d → %s %s",
+                            driver_id, day, hour, minute,
+                            special["action"], special.get("params", {}))
+            return special
+
         # 4. 查询 + 评估货源（传入仿真时间以正确计算装货窗等待）
         items = self._query(driver_id, lat, lng)
         ev = CargoEvaluator(driver_lat=lat, driver_lng=lng,

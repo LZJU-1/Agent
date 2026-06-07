@@ -153,7 +153,11 @@ class CargoEvaluator:
 
     # ---------- 公开方法 ----------
 
-    def evaluate(self, cargo_items: list[dict[str, Any]]) -> CargoEvaluationResult:
+    def evaluate(
+        self,
+        cargo_items: list[dict[str, Any]],
+        simulation_minutes: int = 0,
+    ) -> CargoEvaluationResult:
         """对一批候选货源执行完整经济评估。"""
         evaluated: list[EvaluatedCargo] = []
         filtered_out = 0
@@ -167,8 +171,8 @@ class CargoEvaluator:
                 filtered_out += 1
                 continue
 
-            # 2. 经济计算
-            ev = self._compute_economics(cargo, distance_km)
+            # 2. 经济计算（含装货窗等待时间）
+            ev = self._compute_economics(cargo, distance_km, simulation_minutes)
             if ev.total_time_min <= 0:
                 filtered_out += 1
                 continue
@@ -263,7 +267,12 @@ class CargoEvaluator:
                 return False
         return True
 
-    def _compute_economics(self, cargo: dict[str, Any], distance_to_pickup: float) -> EvaluatedCargo:
+    def _compute_economics(
+        self,
+        cargo: dict[str, Any],
+        distance_to_pickup: float,
+        simulation_minutes: int = 0,
+    ) -> EvaluatedCargo:
         """计算货源的经济指标。"""
         cargo_id = str(cargo.get("cargo_id", ""))
         cargo_name = str(cargo.get("cargo_name", ""))
@@ -285,7 +294,7 @@ class CargoEvaluator:
         # 时间
         pickup_time_min = distance_to_minutes(pickup_distance_km)
         haul_time_min = int(cargo.get("cost_time_minutes", 0))
-        wait_time_min = self._compute_wait_time(cargo, pickup_time_min)
+        wait_time_min = self._compute_wait_time(cargo, pickup_time_min, simulation_minutes)
 
         total_time_min = pickup_time_min + wait_time_min + haul_time_min
 
@@ -319,15 +328,48 @@ class CargoEvaluator:
             raw=cargo,
         )
 
-    @staticmethod
-    def _compute_wait_time(cargo: dict[str, Any], pickup_time_min: int) -> int:
-        """估算装货窗等待时间。"""
+    # 仿真纪元: 2026-03-01 00:00:00
+    _SIM_EPOCH = __import__("datetime").datetime(2026, 3, 1, 0, 0, 0)
+
+    @classmethod
+    def _compute_wait_time(
+        cls,
+        cargo: dict[str, Any],
+        pickup_time_min: int,
+        simulation_minutes: int = 0,
+    ) -> int:
+        """计算装货窗等待时间（分钟）。
+
+        仿真时间线：simulation_minutes=0 对应 2026-03-01 00:00:00。
+        到达装货地时间 = simulation_minutes + pickup_time_min（忽略 query_scan）。
+        等待时间 = max(0, 装货窗开始 - 到达时间)。
+        若到达时间晚于装货窗结束，接单会失败，返回极大值。
+        """
         load_time = cargo.get("load_time")
         if not isinstance(load_time, list) or len(load_time) != 2:
             return 0
-        # 简单估算：如果 load_time 窗口开始时间较晚则需要等待
-        # 精确计算需要当前仿真时间，此处仅做相对估算
-        return 0  # 等待时间在接单时由仿真引擎精确计算
+
+        try:
+            lt_start_str = str(load_time[0]).strip().replace(" ", "T")
+            lt_end_str = str(load_time[1]).strip().replace(" ", "T")
+            lt_start = cls._SIM_EPOCH.fromisoformat(lt_start_str)
+            lt_end = cls._SIM_EPOCH.fromisoformat(lt_end_str)
+        except (ValueError, TypeError):
+            return 0
+
+        lt_start_min = int((lt_start - cls._SIM_EPOCH).total_seconds() // 60)
+        lt_end_min = int((lt_end - cls._SIM_EPOCH).total_seconds() // 60)
+
+        if lt_end_min < lt_start_min:
+            return 0  # 无效时间窗
+
+        arrival_min = simulation_minutes + pickup_time_min
+
+        if arrival_min > lt_end_min:
+            # 到达时已过装货窗 — 接单必然失败
+            return 999999
+
+        return max(0, lt_start_min - arrival_min)
 
     def _assess_preference_risk(self, ev: EvaluatedCargo) -> None:
         """评估货源与已知偏好类型的潜在冲突风险。

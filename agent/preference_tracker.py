@@ -154,7 +154,7 @@ class PreferenceTracker:
             accepted_cargo_regions=list(self._accepted_regions),
             total_active_days=sum(1 for v in self._daily_active_min.values() if v > 0),
             total_full_rest_days=sum(
-                1 for d in range(day + 1)
+                1 for d in range(day)  # 只统计已过去的整天，不含今天
                 if self._daily_active_min.get(d, 0) == 0
             ),
             last_action_type=self._last_action_type,

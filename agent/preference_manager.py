@@ -141,29 +141,36 @@ class PreferenceManager:
         月度全休和特殊日期全休优先级最高，必须全天休息。
         """
 
-        # --- 铁律 5: 月度全休 (最高优先级 — 计划日强制全休) ---
+        # --- 铁律 5: 月度全休 (最高优先级) ---
         for r in self.monthly_rests:
             remaining = 31 - self._day + 1
             need_more = max(0, r.days_needed - self._full_rest_days)
 
-            # 检查今天是否是计划全休日（均匀分布，保证达标）
+            # 检查今天/明天是否是计划全休日
             interval = max(1, 31 // max(r.days_needed, 1))
             offset = interval // 2
-            is_scheduled = False
+            is_scheduled_today = False
+            is_scheduled_tomorrow = False
             for i in range(r.days_needed):
                 sd = offset + i * interval + 1
                 if sd > 31: sd = 31
                 if self._day == sd:
-                    is_scheduled = True
-                    break
+                    is_scheduled_today = True
+                if self._day + 1 == sd:
+                    is_scheduled_tomorrow = True
 
             # 紧急兜底：剩余天数刚好够
-            if not is_scheduled and remaining <= need_more:
-                is_scheduled = True
+            if not is_scheduled_today and remaining <= need_more:
+                is_scheduled_today = True
 
-            # 🔑 计划日无条件全休！不管 _full_rest_days 是否已达标
-            # 因为意外全休日（无货可接被动休息）不能替代计划日
-            if is_scheduled:
+            # 🔑 计划日无条件全休！
+            if is_scheduled_today:
+                rem_today = 24 * 60 - (hour * 60 + minute)
+                if rem_today > 60:
+                    return {"action": "wait", "params": {"duration_minutes": max(240, rem_today)}}
+
+            # 🔑 计划日前一天：18点后强制休息，避免跨天动作破坏计划日
+            if is_scheduled_tomorrow and hour >= 18:
                 rem_today = 24 * 60 - (hour * 60 + minute)
                 if rem_today > 60:
                     return {"action": "wait", "params": {"duration_minutes": max(240, rem_today)}}
@@ -749,20 +756,29 @@ class PreferenceManager:
         return float(result) if result > 0 else 0.0
 
     def _cargo_deadline(self) -> int:
-        """动态货源截止时间：基于今天已休息的时长计算最晚可接单完成时间。"""
+        """动态货源截止时间。"""
+        # 🔑 如果明天是计划全休日，必须在今天24:00前完成所有任务
+        for r in self.monthly_rests:
+            interval = max(1, 31 // max(r.days_needed, 1))
+            offset = interval // 2
+            for i in range(r.days_needed):
+                sd = offset + i * interval + 1
+                if sd > 31: sd = 31
+                if self._day + 1 == sd:
+                    return 24 * 60 - 10  # 今天23:50前必须完成
+
         for r in self.daily_rests:
             if r.rest_type == "continuous":
                 already = self._longest_rest()
                 required = r.required_hours * 60
                 still_need = max(0, required - already)
                 if still_need <= 0:
-                    return 24 * 60  # 已经休息够了，全天都可以接单
-                # 需要在当天完成 still_need 的休息 + 1h 缓冲
+                    return 24 * 60  # 已经休息够了
                 return 24 * 60 - still_need - 60
             elif r.rest_type == "window":
                 ws = r.window_start
                 return (ws - 1) * 60 if ws >= 1 else 23 * 60
-        return 24 * 60  # 无休息偏好，全天可接单
+        return 24 * 60
 
     def _longest_rest(self) -> int:
         if not self._today_rest_intervals:

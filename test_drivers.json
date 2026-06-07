@@ -1,0 +1,179 @@
+[
+  {
+    "driver_id": "D003",
+    "name": "王师傅",
+    "vehicle_no": "粤B30003",
+    "truck_length": "4.2米",
+    "cost_per_km": 1.5,
+    "current_lat": 22.84,
+    "current_lng": 113.21,
+    "preferences": [
+      {
+        "content": "身体不比年轻时候了，每天至少连续停车熄火休息满10小时，少一分钟第二天都没精神。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 3000,
+        "penalty_cap": 93000
+      },
+      {
+        "content": "鲜活水产品那玩意儿太麻烦，缺氧翻肚就得赔，凡是鲜活水产品的活儿我一律不接，每接一次都扣钱。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 2500,
+        "penalty_cap": null
+      },
+      {
+        "content": "三月得歇两个整天回老家办点宅基地的事，那天车完全别动。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 8000,
+        "penalty_cap": 8000
+      },
+      {
+        "content": "三月十五号老表在佛山（22.84，113.21）结婚，当天得到佛山停一趟喝喜酒，起码待三个小时。",
+        "start_time": "2026-03-14 00:00:00",
+        "end_time": "2026-03-15 23:59:59",
+        "penalty_amount": 4000,
+        "penalty_cap": 4000
+      }
+    ]
+  },
+  {
+    "driver_id": "D004",
+    "name": "赵师傅",
+    "vehicle_no": "粤A40004",
+    "truck_length": "4.2米",
+    "cost_per_km": 1.6,
+    "current_lat": 23.13,
+    "current_lng": 113.26,
+    "preferences": [
+      {
+        "content": "我习惯早睡，每天晚上十点到第二天早上五点必须停车熄火睡觉，雷打不动的规矩。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 2000,
+        "penalty_cap": 62000
+      },
+      {
+        "content": "东莞厚街那边有几个固定客户，自然月里装货或卸货在东莞的货，起码得接够五个不同的日子，照顾老客户。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 5000,
+        "penalty_cap": 5000
+      },
+      {
+        "content": "深圳查超载太厉害，装货地或卸货地在深圳的货我死活不接，每接一次都要扣钱。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 1000,
+        "penalty_cap": null
+      },
+      {
+        "content": "接单赶去装货那一程，空驶超过四十公里我就不想跑，超一次扣150。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 150,
+        "penalty_cap": null
+      }
+    ]
+  },
+  {
+    "driver_id": "D005",
+    "name": "刘师傅",
+    "vehicle_no": "粤C50005",
+    "truck_length": "4.2米",
+    "cost_per_km": 1.4,
+    "current_lat": 22.54,
+    "current_lng": 114.06,
+    "preferences": [
+      {
+        "content": "我腰不好，每天至少连续停车休息满9小时，不然第二天就疼得厉害。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 2800,
+        "penalty_cap": 86800
+      },
+      {
+        "content": "金属钢材和化工原料这些重货脏活我干不了，推掉，每接一次都要扣钱。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 3500,
+        "penalty_cap": null
+      },
+      {
+        "content": "珠海那边修路堵得厉害，装货地或卸货地在珠海的货，我一律不接，这月不进珠海。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 600,
+        "penalty_cap": null
+      },
+      {
+        "content": "这个月起码得抽三个整天完全不出车，回去陪老婆孩子。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 10000,
+        "penalty_cap": 10000
+      },
+      {
+        "content": "三月八号那天广州查环保，我不往广州跑，也别给我派进去那边的货。",
+        "start_time": "2026-03-07 00:00:00",
+        "end_time": "2026-03-08 23:59:59",
+        "penalty_amount": 3000,
+        "penalty_cap": 3000
+      },
+      {
+        "content": "佛山那边有亲戚，每月装货或卸货在佛山的，起码得接够三个不同的日子去串串门。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 5000,
+        "penalty_cap": 5000
+      }
+    ]
+  },
+  {
+    "driver_id": "D006",
+    "name": "孙师傅",
+    "vehicle_no": "粤D60006",
+    "truck_length": "4.2米",
+    "cost_per_km": 1.55,
+    "current_lat": 23.02,
+    "current_lng": 113.75,
+    "preferences": [
+      {
+        "content": "零点到早上六点我必须得睡觉，车得停着熄火，身体要紧。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 1800,
+        "penalty_cap": 55800
+      },
+      {
+        "content": "食品饮料这类货容易磕碰变质，赔不起，凡是食品饮料货源我一律推掉，每接一次都扣钱。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 3000,
+        "penalty_cap": null
+      },
+      {
+        "content": "这月怎么也得留一个整天停驶做保养，那天别给我排活。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 8000,
+        "penalty_cap": 8000
+      },
+      {
+        "content": "接单后赶去装货那一程，空驶超过六十公里我就不接了，太远不划算，超一次扣100。",
+        "start_time": "2026-03-01 00:00:00",
+        "end_time": "2026-03-31 23:59:59",
+        "penalty_amount": 100,
+        "penalty_cap": null
+      },
+      {
+        "content": "三月二十号得跑一趟东莞（23.02，113.75）再到深圳宝安（22.87，113.83），给两个老客户送货样，到了宝安待一小时。",
+        "start_time": "2026-03-19 00:00:00",
+        "end_time": "2026-03-20 23:59:59",
+        "penalty_amount": 5000,
+        "penalty_cap": 5000
+      }
+    ]
+  }
+]

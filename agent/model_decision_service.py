@@ -207,6 +207,7 @@ class ModelDecisionService:
         "珠海": (22.27, 113.55),
         "汕头": (23.36, 116.68),
         "中山": (22.56, 113.31),
+        "宝安": (22.87, 113.83),
     }
 
     def _query_required_regions(self, driver_id: str, mgr: PreferenceManager) -> list[dict]:

@@ -422,12 +422,15 @@ class PreferenceManager:
 
     @staticmethod
     def _match_forbidden_region(text: str) -> bool:
-        # "不进/不往/不跑 XX" 或 "XX的货我一律不接" (当禁止的是地区)
+        # "不进/不往/不跑/不接 XX" 或 "XX的货...不接" (当禁止的是地区)
         if any(kw in text for kw in ["不进", "不往", "别给我派", "不跑"]):
             return bool(re.search(r'惠州|深圳|广州|东莞|佛山|珠海|汕头|增城', text))
-        # "XX的货，我一律不接" (地区禁止)
-        if re.search(r'的货.*一律不接|一律不接.*的货', text):
-            return bool(re.search(r'惠州|深圳|广州|东莞|佛山|珠海|汕头|增城', text))
+        # 地区 + 的货 + (不接/不拉/死活不接/一律不接)
+        if re.search(r'(?:惠州|深圳|广州|东莞|佛山|珠海|汕头|增城).*(?:不接|不拉|死活不|一律不)', text):
+            return True
+        # 不接/不拉 + 地区
+        if re.search(r'(?:不接|不拉|一律不).*(?:惠州|深圳|广州|东莞|佛山|珠海|汕头|增城)', text):
+            return True
         return False
 
     # ================================================================
@@ -437,37 +440,84 @@ class PreferenceManager:
     @staticmethod
     def _parse_daily_rest(text: str, penalty: float, cap: float | None) -> DailyRest:
         r = DailyRest(text=text, penalty_per_day=penalty, penalty_cap=cap)
-        # 定时窗口: "零点到早上六点" / "23点到4点"
-        if re.search(r'(?:零点|\d+点|凌晨).*(?:到|至|～).*(?:\d+点|早上|凌晨)', text):
+
+        # 提取时间点（支持中文和阿拉伯数字），返回24小时制
+        cn_map = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+                  "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+                  "十一": 11, "十二": 12}
+
+        def _parse_time_24h(s: str) -> int | None:
+            """解析时间字符串为24小时制: '23点'→23, '晚上十点'→22, '早上五点'→5"""
+            # ASCII数字
+            m = re.search(r'(\d+)\s*点', s)
+            if m:
+                return int(m.group(1))
+            # 中文数字
+            for cn, val in cn_map.items():
+                if cn + "点" in s:
+                    h = val
+                    # 上下文修正
+                    if any(p in s for p in ["晚上", "夜里", "夜间"]):
+                        if h == 12:
+                            return 24
+                        elif h <= 11:
+                            return h + 12
+                    return h
+            if "零点" in s:
+                return 0
+            return None
+
+        # 分割文本：找到 "到/至/～" 前后的时间表达式（保持顺序，不排序）
+        parts = re.split(r'(?:到|至|～)', text, maxsplit=1)
+        hour24 = []
+        for part in parts:
+            t = _parse_time_24h(part)
+            if t is not None:
+                if t not in hour24:  # 去重但保持顺序
+                    hour24.append(t)
+
+        has_window = (
+            any(kw in text for kw in ["睡觉", "熄火", "停着", "停车"])
+            and re.search(r'点.*(?:到|至|～).*点', text)
+        )
+
+        if has_window and len(hour24) >= 2:
             r.rest_type = "window"
-            nums = re.findall(r'(\d+)\s*点', text)
-            if len(nums) >= 2:
-                r.window_start, r.window_end = int(nums[0]), int(nums[1])
-            elif '零点' in text or '0点' in text:
-                r.window_start, r.window_end = 0, 6
+            r.window_start = hour24[0]
+            r.window_end = hour24[1] if hour24[1] < 24 else 0
+        elif has_window:
+            r.rest_type = "window"
+            r.window_start = 0
+            r.window_end = 6
         else:
             r.rest_type = "continuous"
             m = re.search(r'(\d+)\s*小时', text)
-            if m: r.required_hours = int(m.group(1))
+            if m:
+                r.required_hours = int(m.group(1))
+            else:
+                m = re.search(r'(十|[一二三四五六七八九]十?)\s*小时', text)
+                if m:
+                    r.required_hours = cn_map.get(m.group(1), 8)
         return r
 
     @staticmethod
     def _parse_forbidden_cargo(text: str, penalty: float, cap: float | None) -> ForbiddenCargo:
         r = ForbiddenCargo(text=text, penalty_per_order=penalty, penalty_cap=cap)
-        # 提取品类名: "机械设备" "蔬菜" 等
-        cats = re.findall(r'(?:凡是|禁接|不接|不拉|一律不|推掉|干不了|不能接)\s*([\w一-鿿]{2,4})', text)
-        # 清洗：去掉 "货源" "货" "类" 等后缀
+        # 提取品类名: "机械设备" "蔬菜" "鲜活水产品" 等 (2-6字)
+        cats = re.findall(r'(?:凡是|禁接|不接|不拉|一律不|推掉|干不了|不能接|凡是)\s*([\w一-鿿]{2,6})', text)
+        # 清洗：去掉 "货源" "货" "类" "品" "的" 等后缀
         cleaned = []
         for c in cats:
             c = c.strip()
-            for suffix in ['货源', '货', '类', '品']:
+            for suffix in ['货源', '活儿', '的活', '货', '类', '品', '的']:
                 if c.endswith(suffix) and len(c) > len(suffix):
                     c = c[:-len(suffix)]
             if len(c) >= 2:
                 cleaned.append(c)
         r.categories = cleaned
         if not r.categories:
-            for kw in ['机械设备', '蔬菜', '鲜活水产品', '玉米', '水果', '化工', '建材', '金属', '家具', '食品']:
+            for kw in ['机械设备', '蔬菜', '鲜活水产品', '玉米', '水果', '化工', '建材',
+                       '金属', '金属钢材', '家具', '食品', '食品饮料']:
                 if kw in text:
                     r.categories.append(kw)
         return r
@@ -517,7 +567,7 @@ class PreferenceManager:
         # 判断日期类型（顺序重要！）
         if any(kw in text for kw in ["不进", "不往", "别给我派", "查车"]):
             r.date_type = "forbidden_region"
-            r.regions = re.findall(r'惠州|深圳|广州|东莞|佛山|珠海|汕头|中山|江门|增城', text)
+            r.regions = list(set(re.findall(r'惠州|深圳|广州|东莞|佛山|珠海|汕头|中山|江门|增城', text)))
         elif any(kw in text for kw in ["盘库", "对清楚", "清库存"]):
             # 需要去某地停留办事 — 不是全休！
             r.date_type = "goto_place"
@@ -531,8 +581,16 @@ class PreferenceManager:
                 r.date_type = "goto_place"
             r.regions = cities
         elif any(kw in text for kw in ["得到", "去到", "去一趟", "停一趟", "过去", "跑一趟"]):
-            r.date_type = "goto_place"
-            r.regions = list(set(re.findall(r'增城|惠州|深圳|广州|东莞|佛山|珠海|汕头|中山|江门|四会|从化|花都', text)))
+            cities = list(set(re.findall(r'增城|惠州|深圳|广州|东莞|佛山|珠海|汕头|中山|江门|四会|从化|花都|宝安', text)))
+            # 如果涉及2+城市且有"再到/再往/然后/接着"等顺序词 → route
+            if len(cities) >= 2 and re.search(r'再(?:到|往|去|跑)|然后|接着|再转', text):
+                r.date_type = "route"
+                # 保持文本中出现的顺序
+                ordered = re.findall(r'增城|惠州|深圳|广州|东莞|佛山|珠海|汕头|中山|江门|四会|从化|花都|宝安', text)
+                r.regions = list(dict.fromkeys(ordered))  # 去重保留顺序
+            else:
+                r.date_type = "goto_place"
+                r.regions = cities
         else:
             r.date_type = "full_rest"
         return r
@@ -599,6 +657,8 @@ class PreferenceManager:
         "佛山": (22.84, 113.21),
         "珠海": (22.27, 113.55),
         "汕头": (23.36, 116.68),
+        "中山": (22.56, 113.31),
+        "宝安": (22.87, 113.83),
     }
 
     def get_special_date_action(

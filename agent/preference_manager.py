@@ -141,29 +141,32 @@ class PreferenceManager:
         月度全休和特殊日期全休优先级最高，必须全天休息。
         """
 
-        # --- 铁律 5: 月度全休 (最高优先级 — 必须在每日休息前检查) ---
+        # --- 铁律 5: 月度全休 (最高优先级 — 计划日强制全休) ---
         for r in self.monthly_rests:
-            if self._full_rest_days < r.days_needed and not self._today_active:
-                remaining = 31 - self._day + 1
-                need_more = r.days_needed - self._full_rest_days
+            remaining = 31 - self._day + 1
+            need_more = max(0, r.days_needed - self._full_rest_days)
 
-                # 紧急：剩余天数刚好够 → 今天必须休
-                if remaining <= need_more:
-                    rem_today = 24 * 60 - (hour * 60 + minute)
-                    if rem_today > 60:
-                        return {"action": "wait", "params": {"duration_minutes": max(240, rem_today)}}
+            # 检查今天是否是计划全休日（均匀分布，保证达标）
+            interval = max(1, 31 // max(r.days_needed, 1))
+            offset = interval // 2
+            is_scheduled = False
+            for i in range(r.days_needed):
+                sd = offset + i * interval + 1
+                if sd > 31: sd = 31
+                if self._day == sd:
+                    is_scheduled = True
+                    break
 
-                # 主动均匀分布：在固定日期全休
-                interval = max(1, 31 // max(r.days_needed, 1))
-                offset = interval // 2
-                for i in range(r.days_needed):
-                    scheduled_day = offset + i * interval + 1
-                    if scheduled_day > 31:
-                        scheduled_day = 31
-                    if self._day == scheduled_day:
-                        rem_today = 24 * 60 - (hour * 60 + minute)
-                        if rem_today > 120:
-                            return {"action": "wait", "params": {"duration_minutes": rem_today}}
+            # 紧急兜底：剩余天数刚好够
+            if not is_scheduled and remaining <= need_more:
+                is_scheduled = True
+
+            # 🔑 计划日无条件全休！不管 _full_rest_days 是否已达标
+            # 因为意外全休日（无货可接被动休息）不能替代计划日
+            if is_scheduled:
+                rem_today = 24 * 60 - (hour * 60 + minute)
+                if rem_today > 60:
+                    return {"action": "wait", "params": {"duration_minutes": max(240, rem_today)}}
 
         # --- 铁律 6: 特殊日期全休 ---
         for r in self.special_dates:
@@ -600,12 +603,28 @@ class PreferenceManager:
     ) -> dict | None:
         """特殊日期的主动导航：goto_place → reposition + wait, route → 逐步导航。
 
-        在特殊日期当天，如果尚未到达目标位置，返回强制动作。
+        在特殊日期当天或前一天，如果尚未到达目标位置，返回强制动作。
         返回 wait 时标记该日期为已满足。None 表示无特殊要求或已满足。
         """
         for r in self.special_dates:
             for d in r.dates:
-                if self._day != d or d in self._fulfilled_special_dates:
+                if d in self._fulfilled_special_dates:
+                    continue
+
+                # 提前1天预定位（仅 route 类型）
+                if r.date_type == "route" and self._day == d - 1 and hour >= 18:
+                    # 提前靠近路线起点
+                    first_target = r.regions[0] if r.regions else None
+                    coords = self._LOCATION_COORDS.get(first_target) if first_target else None
+                    if coords:
+                        dist = self._haversine_km(current_lat, current_lng, coords[0], coords[1])
+                        if dist > 10.0:
+                            return {
+                                "action": "reposition",
+                                "params": {"latitude": coords[0], "longitude": coords[1]},
+                            }
+
+                if self._day != d:
                     continue
 
                 if r.date_type == "goto_place" and r.regions:
